@@ -10,7 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from abc import ABC, abstractmethod
 import requests
-from zipfile import ZipFile, is_zipfile
+from zipfile import ZipFile
 from io import BytesIO
 import shutil
 
