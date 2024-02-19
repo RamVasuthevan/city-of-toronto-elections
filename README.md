@@ -26,7 +26,7 @@ These are election of city councillors and the mayor. These do not consider byel
     1. Click Search Contributions
     2. Click Submit
     3. Click Export
-- Excel file is generated using Javascript, no esay download link
+- Excel file is generated using Javascript, not an esay download link
 
 ### Elections – Official Results
 - From [Open Date:Elections – Official Results](https://open.toronto.ca/dataset/election-results-official/)
