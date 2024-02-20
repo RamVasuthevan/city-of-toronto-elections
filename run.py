@@ -157,8 +157,9 @@ class ElectionsOfficialResults(Data):
     def clean(cls):
         mayor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Mayor.xlsx",type="mayor")
         councillor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Councillor.xlsx",type="councillor")
-        tdsb_counselor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_District_School_Board.xlsx",type="ttsb_trustee")
-        return pd.concat([mayor,councillor,tdsb_counselor],ignore_index=True)
+        tdsb_trustee = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_Catholic_District_School_Board.xlsx",type="ttsb_trustee")
+        tcdsb_trustee = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_District_School_Board.xlsx",type="ttsb_trustee")
+        return pd.concat([mayor,councillor,tdsb_trustee,tcdsb_trustee],ignore_index=True)
 
 def build_db():
     if os.path.exists("database.db"):
@@ -167,6 +168,6 @@ def build_db():
     ElectionsOfficialResults().clean().to_sql(name="elections_official_results",con="sqlite:///database.db")
 
     db = sqlite_utils.Database("database.db")
-    db.create_view("[election_winner]", """SELECT Candidate, Ward, "Vote Count" FROM ( SELECT Candidate, Ward, SUM([Vote Count]) as "Vote Count", ROW_NUMBER() OVER(PARTITION BY Ward ORDER BY SUM([Vote Count]) DESC) as rn FROM elections_official_results GROUP BY Candidate, Ward ) subquery WHERE rn = 1 ORDER BY Ward, "Vote Count" DESC""")
+    db.create_view("[election_winners]", """ SELECT Candidate, Office, "Vote Count" FROM ( SELECT Candidate, Office, SUM("Vote Count") as "Vote Count", ROW_NUMBER() OVER( PARTITION BY Office ORDER BY SUM("Vote Count") DESC ) as rn FROM elections_official_results GROUP BY Candidate, Office ) subquery WHERE rn = 1 ORDER BY CASE WHEN Office = 'Mayor' THEN 1 WHEN Office LIKE 'City Ward%' THEN 2 WHEN Office LIKE 'Toronto District School Board%' THEN 3 WHEN Office LIKE 'Toronto Catholic District School Board%' THEN 4 ELSE 5 END, -- This attempts to extract numeric values for sorting but relies on SQLite's sorting behavior CASE WHEN Office LIKE 'City Ward%' THEN SUBSTR(Office, 10) WHEN Office LIKE 'Toronto District School Board Ward%' THEN SUBSTR(Office, 36) WHEN Office LIKE 'Toronto Catholic District School Board Ward%' THEN SUBSTR(Office, 44) ELSE Office END + 0, -- Adding 0 attempts to force SQLite to treat the substring numerically for sorting Office; """)
 
 build_db()
