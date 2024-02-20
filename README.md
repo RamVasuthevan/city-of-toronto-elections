@@ -38,6 +38,13 @@ These are election of city councillors and the mayor. These do not consider byel
 > Note there are no results for the French language school boards. Candidates were either acclaimed or the election was voided.
 - 2022_Toronto_Poll_By_Poll_All_Offices.xlsx
 
+### city-wards
+- From [City Wards](https://open.toronto.ca/dataset/city-wards/)
+- 25-ward-model-december-2018-wgs84-latitude-longitude in 25-ward-model-december-2018-wgs84-latitude-longitude
+- 44-ward-model-may-2010-wgs84-latitude-longitude in gcc
+- 47-ward-model-wgs84-latitude-longitude in 47-ward-model-wgs84-latitude-longitude
+
+
 
 URLS:
 - https://studious-waffle-vgr9x7rqjj4hp745-8001.app.github.dev/database?sql=SELECT%0D%0A++Candidate%2C%0D%0A++Ward%2C%0D%0A++%22Vote+Count%22%0D%0AFROM+%28%0D%0A++SELECT%0D%0A++++Candidate%2C%0D%0A++++Ward%2C%0D%0A++++SUM%28%5BVote+Count%5D%29+as+%22Vote+Count%22%2C%0D%0A++++ROW_NUMBER%28%29+OVER%28PARTITION+BY+Ward+ORDER+BY+SUM%28%5BVote+Count%5D%29+DESC%29+as+rn%0D%0A++FROM%0D%0A++++elections_official_results%0D%0A++GROUP+BY%0D%0A++++Candidate%2C%0D%0A++++Ward%0D%0A%29+subquery%0D%0AWHERE+rn+%3D+1%0D%0AORDER+BY%0D%0A++Ward%2C+%22Vote+Count%22+DESC%3B%0D%0A
