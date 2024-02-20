@@ -59,7 +59,27 @@ class ElectionsOfficialResults(Data):
         pass
 
     @staticmethod
-    def clean_election_search_results_2022(file_path,mayor=False):
+    def extract_city_ward_results_2022(df):
+        return df
+
+    @staticmethod
+    def split_df_on_subdivision(df):
+        # Find the index positions where 'Subdivision' occurs in the first column
+        subdivision_indices = df.index[df.iloc[:, 0] == 'Subdivision'].tolist()
+
+        # Add the last index to cover the final slice
+        subdivision_indices.append(df.shape[0])
+
+        # Split the DataFrame on each index found
+        split_dfs = [df.iloc[subdivision_indices[n]:subdivision_indices[n+1]] for n in range(len(subdivision_indices)-1)]
+
+        # Optional: reset index for each smaller DataFrame
+        #split_dfs = [small_df.reset_index(drop=True) for small_df in split_dfs]
+
+        return split_dfs
+    
+    @staticmethod
+    def clean_election_search_results_2022(file_path,type):
         # Initialize an empty list to hold DataFrames
         dfs = []
 
@@ -71,29 +91,55 @@ class ElectionsOfficialResults(Data):
             sheet = workbook[sheet_name]
 
             # Extract 'Ward Name' from cell A1
-            office = "Mayor" if mayor else sheet['A1'].value
+            if type != "mayor":
+                office = sheet['A1'].value
+            else:
+                office = "Mayor"
 
-            # Read the sheet into a DataFrame, skipping the first row
-            df = pd.read_excel(file_path, sheet_name=sheet_name, skiprows=1, engine="openpyxl")
+            df = pd.read_excel(file_path, sheet_name=sheet_name, skiprows=0, engine="openpyxl")
 
-            # Drop the first row (now second row in df) which contains the position, e.g., 'Mayor'
-            df = df.iloc[1:]
+            # Drop the 2nd row with office
+            if type == "mayor" or type == "councillor":
+                df = pd.concat([df.iloc[:1], df.iloc[2:]]).reset_index(drop=True)
 
-            # Drop the last row (which may contain total values)
-            df = df.iloc[:-1]
 
-            df = df.drop(columns='Total')
+            for city_ward_results in ElectionsOfficialResults.split_df_on_subdivision(df):
+                df = city_ward_results
+                
+                ward = df.iloc[-1, 0]
 
-            # Rename the columns and add 'Ward' and 'Ward Name' columns
-            df.columns = ['Candidate'] + list(map(int, df.columns[1:]))
-            df['Ward'] = int(sheet_name.split()[-1])
-            df['Office'] = office
+                # Set first row as column name and delete first row
+                df.columns = df.iloc[0]
+                df = df[1:]
+                
 
-            # Melt the DataFrame to convert it from wide to long format
-            df = pd.melt(df, id_vars=['Office', 'Ward', 'Candidate'], var_name='Subdivision', value_name='Vote Count')
+                # Remove trailing blank rows
+                while df.tail(1).isna().all(axis=1).values[0]:
+                    df = df.iloc[:-1]
+                
+                ward = df.iloc[-1, 0]
 
-            # Append the melted DataFrame to the list
-            dfs.append(df)
+                # Drop the last row (which may contain total values)
+                df = df.iloc[:-1]          
+
+
+                #Not all city wards have the same number of subdvisions. Remove columns with name NaN
+                df = df.loc[:, df.columns.notna()]
+
+                # Drop the last column (which may contain total values)
+                df = df.iloc[:, :-1]
+                
+                # Rename the columns and add 'Ward' and 'Ward Name' columns
+                df.columns = ['Candidate'] + list(int(c) for c in  df.columns[1:])
+            
+                df['Ward'] = ward
+                df['Office'] = office
+
+                # Melt the DataFrame to convert it from wide to long format
+                df = pd.melt(df, id_vars=['Office', 'Ward', 'Candidate'], var_name='Subdivision', value_name='Vote Count')
+
+                # Append the melted DataFrame to the list
+                dfs.append(df)
 
         # Concatenate all DataFrames in the list into a single DataFrame
         data = pd.concat(dfs, ignore_index=True)
@@ -109,18 +155,15 @@ class ElectionsOfficialResults(Data):
 
 
     def clean(cls):
-        mayor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Mayor.xlsx",mayor=True)
-        councillor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Councillor.xlsx")
-        tdsb_counselor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_District_School_Board.xlsx")
+        mayor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Mayor.xlsx",type="mayor")
+        councillor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Councillor.xlsx",type="councillor")
+        tdsb_counselor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_District_School_Board.xlsx",type="ttsb_trustee")
         return pd.concat([mayor,councillor,tdsb_counselor],ignore_index=True)
 
 def build_db():
     if os.path.exists("database.db"):
         os.remove("database.db")
     ContributionSearchResults().clean().to_sql(name="contribution_search_results",con="sqlite:///database.db")
-    #ElectionsOfficialResults().clean("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Mayor.xlsx").to_sql(name="elections_official_results_mayor",con="sqlite:///database.db")
-    #electionsOfficialResults().clean("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Councillor.xlsx").to_sql(name="elections_official_results_councillor",con="sqlite:///database.db")
-    #ElectionsOfficialResults().clean("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_District_School_Board.xlsx").to_sql(name="elections_official_results_tdsb_trustee",con="sqlite:///database.db")
     ElectionsOfficialResults().clean().to_sql(name="elections_official_results",con="sqlite:///database.db")
 
     db = sqlite_utils.Database("database.db")
