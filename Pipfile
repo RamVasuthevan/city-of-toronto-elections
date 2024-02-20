@@ -4,10 +4,15 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-pandas = "*"
+pandas = "1.4.0"
+datasette = "*"
+csvs-to-sqlite = "*"
+xlrd = ">=1.0.0"
+SQLAlchemy = "*"
+openpyxl = "*"
+sqlite-utils = "*"
 
 [dev-packages]
-
 
 [requires]
 python_version = "3.11"
