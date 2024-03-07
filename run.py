@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from openpyxl import load_workbook
 import sqlite_utils
+from enum import Enum
 
 
 class Data(ABC):
@@ -20,6 +21,12 @@ class Data(ABC):
     def clean():
         """Abstract static clean method. Subclasses should implement this."""
         pass
+
+class OfficeType(Enum):
+    MAYOR = "Mayor"
+    COUNCILLOR = "City Councillor"
+    TDSB_TRUSTEE = "TDSB Trustee"
+    TCDSB_TRUSTEE = "TCDSB Trustee"
 
 class ContributionSearchResults(Data):
     raw_data_dir = os.path.join(os.getcwd(), "raw_data/contribution_search_results/2022/")
@@ -79,7 +86,7 @@ class ElectionsOfficialResults(Data):
         return split_dfs
     
     @staticmethod
-    def clean_election_search_results_2022(file_path,type):
+    def clean_election_search_results_2022(file_path,office_type):
         # Initialize an empty list to hold DataFrames
         dfs = []
 
@@ -90,16 +97,12 @@ class ElectionsOfficialResults(Data):
             # Access the sheet
             sheet = workbook[sheet_name]
 
-            # Extract 'Ward Name' from cell A1
-            if type != "mayor":
-                office = sheet['A1'].value
-            else:
-                office = "Mayor"
+            office = sheet['A1'].value
 
             df = pd.read_excel(file_path, sheet_name=sheet_name, skiprows=0, engine="openpyxl")
 
             # Drop the 2nd row with office
-            if type == "mayor" or type == "councillor":
+            if office_type == OfficeType.MAYOR or office_type == OfficeType.COUNCILLOR:
                 df = pd.concat([df.iloc[:1], df.iloc[2:]]).reset_index(drop=True)
 
 
@@ -132,8 +135,19 @@ class ElectionsOfficialResults(Data):
                 # Rename the columns and add 'Ward' and 'Ward Name' columns
                 df.columns = ['Candidate'] + list(int(c) for c in  df.columns[1:])
             
-                df['Ward'] = ward
-                df['Office'] = office
+                df['Ward'] = " ".join(ward.split()[:-1])
+
+                if office_type == OfficeType.MAYOR:
+                    df['Office'] = "Mayor"
+                elif office_type == OfficeType.COUNCILLOR:
+                    ward_number = ward.split()[2]
+                    df['Office'] = f"Councillor Ward {ward_number}"
+                elif office_type == OfficeType.TDSB_TRUSTEE:
+                    ward_number = ward.split()[-2]
+                    df['Office'] = f"TDSB Trustee {ward_number}"
+                elif office_type == OfficeType.TCDSB_TRUSTEE:
+                    ward_number = ward.split()[-2]
+                    df['Office'] = f"TCDSB Trustee {ward_number}"
 
                 # Melt the DataFrame to convert it from wide to long format
                 df = pd.melt(df, id_vars=['Office', 'Ward', 'Candidate'], var_name='Subdivision', value_name='Vote Count')
@@ -155,19 +169,59 @@ class ElectionsOfficialResults(Data):
 
 
     def clean(cls):
-        mayor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Mayor.xlsx",type="mayor")
-        councillor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Councillor.xlsx",type="councillor")
-        tdsb_trustee = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_Catholic_District_School_Board.xlsx",type="ttsb_trustee")
-        tcdsb_trustee = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_District_School_Board.xlsx",type="ttsb_trustee")
+        mayor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Mayor.xlsx",office_type=OfficeType.MAYOR)
+        councillor = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Councillor.xlsx",office_type=OfficeType.COUNCILLOR)
+        tdsb_trustee = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_District_School_Board.xlsx",office_type=OfficeType.TDSB_TRUSTEE)
+        tcdsb_trustee = cls.clean_election_search_results_2022("raw_data/elections_official_results/2022/2022_Toronto_Poll_By_Poll_Toronto_Catholic_District_School_Board.xlsx",office_type=OfficeType.TCDSB_TRUSTEE)
+
         return pd.concat([mayor,councillor,tdsb_trustee,tcdsb_trustee],ignore_index=True)
 
 def build_db():
     if os.path.exists("database.db"):
         os.remove("database.db")
-    ContributionSearchResults().clean().to_sql(name="contribution_search_results",con="sqlite:///database.db")
-    ElectionsOfficialResults().clean().to_sql(name="elections_official_results",con="sqlite:///database.db")
+
+    ContributionSearchResults().clean().to_sql(name="contribution_search_results",con="sqlite:///database.db",index=False)
+    ElectionsOfficialResults().clean().to_sql(name="elections_official_results",con="sqlite:///database.db",index=False)
 
     db = sqlite_utils.Database("database.db")
-    db.create_view("[election_winners]", """ SELECT Candidate, Office, "Vote Count" FROM ( SELECT Candidate, Office, SUM("Vote Count") as "Vote Count", ROW_NUMBER() OVER( PARTITION BY Office ORDER BY SUM("Vote Count") DESC ) as rn FROM elections_official_results GROUP BY Candidate, Office ) subquery WHERE rn = 1 ORDER BY CASE WHEN Office = 'Mayor' THEN 1 WHEN Office LIKE 'City Ward%' THEN 2 WHEN Office LIKE 'Toronto District School Board%' THEN 3 WHEN Office LIKE 'Toronto Catholic District School Board%' THEN 4 ELSE 5 END, CASE WHEN Office LIKE 'City Ward%' THEN SUBSTR(Office, 10) WHEN Office LIKE 'Toronto District School Board Ward%' THEN SUBSTR(Office, 36) WHEN Office LIKE 'Toronto Catholic District School Board Ward%' THEN SUBSTR(Office, 44) ELSE Office END + 0, Office; """)
+    db.create_view("[election_winners]", """ 
+                                        SELECT 
+                                            Candidate, 
+                                            Office, 
+                                            "Vote Count" 
+                                        FROM 
+                                            (
+                                                SELECT 
+                                                    Candidate, 
+                                                    Office, 
+                                                    SUM("Vote Count") AS "Vote Count", 
+                                                    ROW_NUMBER() OVER (
+                                                        PARTITION BY Office 
+                                                        ORDER BY SUM("Vote Count") DESC
+                                                    ) AS rn 
+                                                FROM 
+                                                    elections_official_results 
+                                                GROUP BY 
+                                                    Candidate, 
+                                                    Office 
+                                            ) AS subquery 
+                                        WHERE 
+                                            rn = 1 
+                                        ORDER BY 
+                                            CASE 
+                                                WHEN Office = 'Mayor' THEN 1 
+                                                WHEN Office LIKE 'Councillor Ward%' THEN 2 
+                                                WHEN Office LIKE 'TCDSB Trustee Ward%' THEN 3 
+                                                WHEN Office LIKE 'TDSB Trustee Ward%' THEN 4 
+                                                ELSE 5 
+                                            END, 
+                                            CASE 
+                                                WHEN Office LIKE 'Councillor Ward%' THEN CAST(SUBSTR(Office, 17) AS INTEGER) 
+                                                WHEN Office LIKE 'TCDSB Trustee Ward%' THEN CAST(SUBSTR(Office, 20) AS INTEGER) 
+                                                WHEN Office LIKE 'TDSB Trustee Ward%' THEN CAST(SUBSTR(Office, 18) AS INTEGER) 
+                                                ELSE 0 
+                                            END, 
+                                            Office;
+                                        """)
 
 build_db()
